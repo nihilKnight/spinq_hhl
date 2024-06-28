@@ -1,5 +1,9 @@
 .ipynb_checkpoints/
 .venv/
 
+images/
+
 **/__pycache__/
+
+_*
 
