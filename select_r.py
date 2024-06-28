@@ -8,18 +8,9 @@ from pyqpanda import *
 import numpy as np
 
 
-# In[2]:
-
-
-def draw(prog, filename=''):
-    dir_path = './images/'
-    if filename != '':
-        draw_qprog(prog, 'pic', filename=f'{dir_path}{filename}')
-
-
 # ## Init Quantum Environment
 
-# In[3]:
+# In[2]:
 
 
 class InitQMachine:
@@ -35,7 +26,7 @@ class InitQMachine:
         destroy_quantum_machine(self.machine)
 
 
-# In[4]:
+# In[3]:
 
 
 ctx = InitQMachine(4, 4)
@@ -47,30 +38,37 @@ cbits = ctx.cbits
 
 # # 0. Tool Functions
 
-# In[7]:
+# In[4]:
 
 
 Dag = lambda matrix: matrix.conj().T
 
 
-# In[9]:
+# In[5]:
 
 
 normalize = lambda v: v / np.linalg.norm(v)
 
 
-# In[28]:
+# In[6]:
 
 
 def is_hermitian(matrix):
     return np.allclose(matrix, Dag(matrix))
 
 
+# In[7]:
+
+
+def ed(m, n):
+     return np.sqrt(np.sum((m - n) ** 2))
+
+
 # # 1. Solve using numpy
 
 # ## 1.0 solve original problem
 
-# In[19]:
+# In[8]:
 
 
 A = np.array([
@@ -83,90 +81,74 @@ b = np.array([
 ])
 
 
-# In[20]:
+# In[9]:
 
 
 # solve: Ax = b
 x = np.linalg.solve(A, b)
-print("slove: Ax=b")
-print(x)
-print()
+x
 
 
 # ## 1.1 test A†Ax = A†b
 
-# In[21]:
+# In[10]:
 
 
-print("Dag(A):")
-print(Dag(A))
-print()
+Dag(A)
 
 
-# In[22]:
+# In[11]:
 
 
 A_ = Dag(A) @ A # make A hermitian
 b_ = Dag(A) @ b
-print("A_ is:")
-print(A_)
-print("b_ is:")
-print(b_)
-print()
 
 
-# In[23]:
+# In[12]:
 
 
 x = np.linalg.solve(A_, b_)
-print("A_ times x = b_")
-print(x)
-print()
+x
 
 
 # ## 1.2 eigenvalue of A
 
-# In[27]:
+# In[13]:
 
 
 eigenvalue, _ = np.linalg.eig(A_)
-print("eigenvalue:")
-print(eigenvalue)
-print()
+eigenvalue
 
 
 # # 2. HHL
 
 # ## 2.1 make A hermitian
 
-# In[30]:
+# In[14]:
 
 
 A_ = Dag(A) @ A # make A hermitian
 
 
-# In[31]:
+# In[15]:
 
 
 # test is_hermitian
-print("is_hermitian(A):")
 print(is_hermitian(A)) # false
-print("is_hermitian(A_):")
 print(is_hermitian(A_)) # true
-print()
 
 
 # ## 2.2 HHL algorithm subroutines
 
 # ### 2.2.1 encode b
 
-# In[35]:
+# In[16]:
 
 
 QOperator(X(qubits[0])).get_matrix()
 
 
-# In[33]:
+# In[17]:
 
 
 def encode(b):
@@ -177,13 +159,7 @@ def encode(b):
     return circuit
 
 
-# In[34]:
-
-
-draw(encode(b_), 'encode_x')
-
-
-# In[36]:
+# In[18]:
 
 
 # https://arxiv.org/pdf/1110.2232.pdf
@@ -191,7 +167,7 @@ draw(encode(b_), 'encode_x')
 
 # ### 2.2.2 phase estimation
 
-# In[38]:
+# In[19]:
 
 
 def phase_estimation(A):
@@ -215,35 +191,23 @@ def phase_estimation(A):
     return circuit
 
 
-# In[39]:
-
-
-draw(phase_estimation(A_), 'phase_estimation')
-
-
 # ### 2.2.4 controlled rotations
 
-# In[40]:
+# In[20]:
 
 
-def rotation():
+def rotation(r):
     circuit = create_empty_circuit()
     
-    circuit << RY(qubits[0], np.pi / 32).control(qubits[2])
-    circuit << RY(qubits[0], np.pi / 16).control(qubits[1])
+    circuit << RY(qubits[0], 2*np.pi/(2**r)).control(qubits[1])
+    circuit << RY(qubits[0], np.pi/(2**r)).control(qubits[2])
     
     return circuit
 
 
-# In[41]:
-
-
-draw(rotation(), 'rotation')
-
-
 # ### 2.2.5 uncompute
 
-# In[43]:
+# In[21]:
 
 
 def uncompute(A):
@@ -267,18 +231,12 @@ def uncompute(A):
     return circuit
 
 
-# In[44]:
-
-
-draw(uncompute(A_), 'uncompute')
-
-
 # ## 2.3 full HHL algorithm 
 
-# In[45]:
+# In[22]:
 
 
-def HHL(A, b):
+def HHL(A, b, r, flag=False):
     prog = create_empty_qprog()
     
     # Step 0. check input
@@ -295,25 +253,36 @@ def HHL(A, b):
     prog << phase_estimation(A)
     
     # Step 3. rotation
-    prog << rotation()
+    prog << rotation(r)
     
     # Step 4. uncompute
     prog << uncompute(A)
     
-    prog << BARRIER(qubits)
-    
     # Step 5. measure ancilla qubit
     prog << Measure(qubits[0], cbits[0])
+    if flag:
+        results = [0, 0]
+        for i in range(10000):
+            result = prob_run_list(prog, qubits[0], -1)
+            results[0] += result[0]
+            results[1] += result[1]
+
+        results[0] /= 10000
+        results[1] /= 10000
+        
+        return results
     
     result = directly_run(prog)
+    
     if not result['c0']:
-#         print('attempting...')
-        return HHL(A, b)
+        return HHL(A, b, r)
     
     # Step 6. get results
+    prog << Measure(qubits[3], cbits[3])
+    
     qstate = get_qstate()
     normed_x = np.real(np.array([qstate[1], qstate[9]])) # 0001 1001
-    
+        
     # Step 7. recover x
     N = len(normed_b)
     ratio = 0.0
@@ -322,24 +291,55 @@ def HHL(A, b):
             ratio = normed_b[i][0] / np.sum([ normed_x[j] * A[i][j] for j in range(N) ])
             break
     
-    originir = convert_qprog_to_originir(prog, ctx.machine)
-    
     # normed_x = x / ||x|| => x = normed_x * ||x||
-    if ratio == 0:
-        return normed_x.tolist(), originir
-    else:
-        return (normed_x * ratio).tolist(), originir
+    x_ = (normed_x * ratio)
+    distance = ed(x_, x.flatten())
+    
+    return distance, x_
 
 
-# In[46]:
+# ## 2.4 select proper r for rotation
+
+# In[23]:
 
 
-print("HHL(A, b) result:")
-print(HHL(A, b)[0])
-print()
-print("HHL(A, b) qasm:")
-print(HHL(A, b)[1])
-print()
+r = [1, 2, 3, 4, 5, 6, 7, 8]
+
+
+# In[24]:
+
+
+p = [ HHL(A, b, i, True)[1] for i in r]
+
+
+# In[25]:
+
+
+distances = [ HHL(A, b, i)[0] for i in r ]
+
+
+# In[26]:
+
+
+import matplotlib.pyplot as plt
+get_ipython().run_line_magic('matplotlib', 'inline')
+
+
+# In[27]:
+
+
+plt.figure(figsize=(15, 4))
+plt.subplot(1,2,1)
+plt.scatter(r, p)
+plt.xlabel("r", fontsize=15)
+plt.ylabel("Probability", fontsize=15)
+
+plt.subplot(1,2,2)
+plt.scatter(r, distances, color="#FF6600")
+plt.xlabel("r", fontsize=15)
+plt.ylabel("Distance", fontsize=15)
+
+plt.show()
 
 
 # In[ ]:
